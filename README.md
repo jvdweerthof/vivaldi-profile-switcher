@@ -8,6 +8,10 @@ Vivaldi Profile Switcher adds two quick ways to move between browser profiles:
 
 It is a small JavaScript modification for Vivaldi on macOS. No extension or background service is installed.
 
+The mod is inspired by Arc's swipe gesture for moving between Spaces. Vivaldi
+does not combine workspaces and profiles in the same way Arc did, but switching
+profiles with a swipe preserves some of that familiar muscle memory.
+
 ![Vivaldi with profile icons at the bottom of the left sidebar and a two-finger swipe area for switching profiles](browser.png)
 
 > [!IMPORTANT]
