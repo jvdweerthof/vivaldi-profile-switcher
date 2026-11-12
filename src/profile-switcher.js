@@ -53,6 +53,8 @@
   let updateDialog;
   let updateWarningItem;
   let copyFeedbackTimer;
+  let windowQueryPending = false;
+  let windowDotsItem;
   const gesturePause = 90;
   const initialMomentumWindow = 45;
   const projectUrl =
@@ -90,6 +92,142 @@
       maximizePending = false;
       console.warn('Profile switcher: window maximization failed.', error);
     }
+  }
+
+  function normalWindows(callback) {
+    const windowsApi = globalThis.chrome?.windows;
+    if (!windowsApi?.getAll) {
+      callback([]);
+      return;
+    }
+    try {
+      windowsApi.getAll({
+        windowTypes: ['normal']
+      }, windows => {
+        callback((windows ?? []).filter(browserWindow =>
+          browserWindow.type === 'normal'
+        ));
+      });
+    } catch (error) {
+      console.warn('Profile switcher: browser windows are unavailable.', error);
+      callback([]);
+    }
+  }
+
+  function readWindowSnapshot(callback) {
+    const windowsApi = globalThis.chrome?.windows;
+    if (!windowsApi?.getCurrent) {
+      callback({ activeKey: '', nodes: [] });
+      return;
+    }
+    try {
+      windowsApi.getCurrent(currentWindow => {
+        normalWindows(windows => {
+          const nodes = windows.slice()
+            .sort((left, right) => left.id - right.id)
+            .map((browserWindow, index) => ({
+              key: `window:${browserWindow.id}`,
+              label: `Window ${index + 1}`,
+              windowId: browserWindow.id
+            }));
+          callback({
+            activeKey: `window:${currentWindow?.id}`,
+            nodes
+          });
+        });
+      });
+    } catch (_error) {
+      callback({ activeKey: '', nodes: [] });
+    }
+  }
+
+  function removeWindowDots() {
+    windowDotsItem?.parentElement?.classList.remove(
+      'profile-switcher-has-window-dots'
+    );
+    windowDotsItem?.remove();
+    windowDotsItem = undefined;
+  }
+
+  function updateWindowDots(snapshot) {
+    if (stopped || !currentAnchorItem?.isConnected ||
+        snapshot.nodes.length < 2) {
+      removeWindowDots();
+      scheduleLayout();
+      return;
+    }
+    const signature = JSON.stringify([
+      snapshot.activeKey,
+      snapshot.nodes.map(node => [node.key, node.label])
+    ]);
+    if (windowDotsItem?.isConnected &&
+        windowDotsItem.dataset.signature === signature) return;
+    if (!windowDotsItem?.isConnected) {
+      windowDotsItem = document.createElement('div');
+      windowDotsItem.className = 'profile-switcher-window-dots';
+      windowDotsItem.setAttribute('role', 'group');
+      windowDotsItem.setAttribute('aria-label', 'Windows in the current profile');
+      currentAnchorItem.classList.add('profile-switcher-has-window-dots');
+      currentAnchorItem.append(windowDotsItem);
+    }
+    windowDotsItem.dataset.signature = signature;
+    windowDotsItem.replaceChildren();
+    snapshot.nodes.forEach(node => {
+      const dot = document.createElement('span');
+      const active = node.key === snapshot.activeKey;
+      dot.className = 'profile-switcher-window-dot';
+      if (active) dot.classList.add('is-active');
+      dot.setAttribute('role', 'img');
+      dot.setAttribute('aria-label', `${node.label}${active ? ' (current)' : ''}`);
+      dot.title = node.label;
+      windowDotsItem.append(dot);
+    });
+    scheduleLayout();
+  }
+
+  function refreshWindows() {
+    if (stopped || windowQueryPending) return;
+    windowQueryPending = true;
+    readWindowSnapshot(snapshot => {
+      windowQueryPending = false;
+      updateWindowDots(snapshot);
+    });
+  }
+
+  function switchWindowOrProfile(direction) {
+    if (busy || stopped) return;
+    busy = true;
+    readWindowSnapshot(snapshot => {
+      if (stopped) {
+        busy = false;
+        return;
+      }
+      updateWindowDots(snapshot);
+      const currentIndex = snapshot.nodes.findIndex(node =>
+        node.key === snapshot.activeKey
+      );
+      const targetIndex = currentIndex + Math.sign(direction);
+      if (currentIndex < 0 || targetIndex < 0 ||
+          targetIndex >= snapshot.nodes.length) {
+        busy = false;
+        switchProfile(direction);
+        return;
+      }
+      const target = snapshot.nodes[targetIndex];
+      const windowsApi = globalThis.chrome?.windows;
+      if (!windowsApi?.update) {
+        busy = false;
+        return;
+      }
+      try {
+        windowsApi.update(target.windowId, { focused: true }, () => {
+          busy = false;
+        });
+      } catch (error) {
+        busy = false;
+        console.warn('Profile switcher: window switching failed.', error);
+      }
+    });
   }
 
   function endGesture() {
@@ -350,6 +488,51 @@
     .profile-switcher-item button:focus-visible .button-icon {
       opacity: 1;
     }
+    .profile-switcher-has-window-dots {
+      position: relative;
+    }
+    .profile-switcher-window-dots {
+      position: absolute;
+      bottom: 1px;
+      left: 50%;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: calc(100% - 8px);
+      height: 10px;
+      color: var(--colorFgFaded);
+      pointer-events: none;
+      transform: translateX(-50%);
+    }
+    .profile-switcher-window-dot {
+      position: relative;
+      display: block;
+      flex: 1 1 0;
+      min-width: 0;
+      max-width: 8px;
+      height: 10px;
+      color: inherit;
+    }
+    .profile-switcher-window-dot::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: min(4px, 70%);
+      height: min(4px, 70%);
+      background: currentColor;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+    }
+    .profile-switcher-window-dot.is-active {
+      color: var(--colorHighlightBg);
+    }
+    .profile-switcher-window-dot.is-active::before {
+      width: min(6px, 100%);
+      height: min(6px, 100%);
+      box-shadow: 0 0 0 1px var(--colorBg);
+    }
     .profile-switcher-update-warning .button-icon {
       width: 18px;
       height: 18px;
@@ -602,6 +785,7 @@
       currentAnchorItem = undefined;
       [...beforeItems, ...afterItems].forEach(item => item.remove());
       updateWarningItem?.remove();
+      removeWindowDots();
       return;
     }
     const anchorChanged = currentAnchorItem !== anchorItem;
@@ -615,9 +799,13 @@
     currentAnchorItem = anchorItem;
     observeStrip(anchorItem.parentElement);
     if (anchorChanged || stripChanged) {
+      if (anchorChanged) {
+        removeWindowDots();
+      }
       placeItems(anchorItem);
       scheduleLayout();
     }
+    refreshWindows();
 
     rendering = true;
     api.getUserProfiles(false, profiles => {
@@ -629,6 +817,7 @@
       if (signature === nextSignature) return;
       signature = nextSignature;
       currentProfiles = list;
+      refreshWindows();
       const currentIndex = list.findIndex(profile => profile.active);
       const beforeButtons = [];
       const afterButtons = [];
@@ -690,7 +879,10 @@
     if (busy || stopped) return;
     busy = true;
     api.getUserProfiles(false, profiles => {
-      if (stopped) return;
+      if (stopped) {
+        busy = false;
+        return;
+      }
       const list = orderedProfiles(profiles);
       const current = list.findIndex(p => p.active);
       if (list.length < 2 || current < 0) {
@@ -706,7 +898,7 @@
   }
 
   function onWheel(event) {
-    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    if (event.ctrlKey || event.metaKey || event.shiftKey) return;
     if (!(event.target instanceof Element)) return;
     const bar = event.target.closest('#tabs-tabbar-container');
     if (!bar) return;
@@ -755,7 +947,7 @@
     locked = true;
     const direction = Math.sign(total) * (options.reverse ? -1 : 1);
     total = 0;
-    switchProfile(direction);
+    switchWindowOrProfile(direction);
   }
 
   function onBlur() {
@@ -833,6 +1025,7 @@
     );
     currentProfiles = [];
     profileItems.clear();
+    removeWindowDots();
     currentAnchorItem = undefined;
     [...beforeItems, ...afterItems].forEach(item => item.remove());
     updateWarningItem?.remove();

@@ -1,16 +1,17 @@
 # Vivaldi Profile Switcher
 
-Vivaldi Profile Switcher adds two quick ways to move between browser profiles:
+Vivaldi Profile Switcher adds quick navigation between browser profiles and
+their windows:
 
-- Swipe horizontally over a vertical tab bar to select the previous or next profile.
+- Swipe horizontally over a vertical tab bar to switch between profiles and windows.
 - Click the neighboring profile avatars beside Vivaldi's account button.
+- See the active profile’s open windows as compact dots along its avatar.
 - Adapt the controls to the available width: show every profile when they fit, collapse to previous/current/next when needed, and place those three on separate rows when even the compact view cannot fit horizontally.
 
 It is a small JavaScript modification for Vivaldi on macOS. No extension or background service is installed.
 
-The mod is inspired by Arc's swipe gesture for moving between Spaces. Vivaldi
-does not combine workspaces and profiles in the same way Arc did, but switching
-profiles with a swipe preserves some of that familiar muscle memory.
+The mod is inspired by Arc's swipe gesture for moving between Spaces, applying
+that familiar muscle memory to Vivaldi profiles and browser windows.
 
 ![Vivaldi with profile icons at the bottom of the left sidebar and a two-finger swipe area for switching profiles](browser.png)
 
@@ -28,8 +29,8 @@ profiles with a swipe preserves some of that familiar muscle memory.
 
 Choose a preset under **Settings → Appearance → Layout Presets**:
 
-- **Vertical Left (recommended):** scrolling on the sidebar switches profiles, and profile icons appear at the bottom.
-- **Vertical Right:** scrolling on the sidebar switches profiles, but profile icons are not shown.
+- **Vertical Left (recommended):** scrolling on the sidebar switches windows and profiles, and profile icons appear at the bottom.
+- **Vertical Right:** scrolling on the sidebar switches windows and profiles, but profile icons are not shown.
 - **All other presets:** the mod has no effect.
 
 ## Install
@@ -118,13 +119,19 @@ const options = {
 - `threshold` is the horizontal wheel or trackpad distance required to switch.
 - `reverse` flips the swipe direction.
 
+An active profile with multiple normal browser windows shows one compact dot
+per window along the bottom of its avatar. Swiping advances through those
+windows, then crosses to the next or previous profile at the boundary. Popup
+windows are not included. A newly selected profile opens its last-used window,
+after which swiping continues from that position.
+
 After editing the file, run the installer and choose the bundled version.
 
-The installer also asks whether each profile window should be maximized when it
-is activated. The first-install default leaves every profile's saved window size
-and position unchanged; later installs preserve the previous choice by default.
-Choose maximization for a more seamless switch between profiles whose windows
-would otherwise have different bounds. Run the installer again to change it.
+The installer asks whether each profile window should be maximized when it is
+activated. The first-install default keeps each profile's saved window size and
+position. Later installs preserve the previous choice by default. Choose
+maximization for a more seamless switch between profiles whose windows would
+otherwise have different bounds. Run the installer again to change the setting.
 
 ## What the installer changes
 
@@ -139,7 +146,7 @@ Each complete file is staged before replacement so an interrupted copy does not 
 ## Troubleshooting
 
 - **The installer says Vivaldi is running:** quit it with <kbd>Command</kbd>+<kbd>Q</kbd>, not just by closing its windows.
-- **Swiping does nothing:** the gesture is enabled only over a vertical tab bar. Trackpad zoom and modifier-key gestures are intentionally ignored.
+- **Swiping does nothing:** the gesture is enabled only over a vertical tab bar. Trackpad zoom and gestures using <kbd>Command</kbd>, <kbd>Control</kbd>, or <kbd>Shift</kbd> are intentionally ignored.
 - **Profile avatars are missing:** confirm that Vivaldi's account/profile button is visible. The switcher positions its buttons relative to that control.
 - **It stopped working after an update:** reinstall first. If that does not help, Vivaldi may have changed a private API or UI selector.
 - **A configured profile cannot be found:** profile names in `order` are exact and case-sensitive.
@@ -154,6 +161,8 @@ node --check src/profile-switcher.js
 ./tests/installer-smoke.sh
 ./tests/bootstrap-smoke.sh
 node tests/gesture-smoke.mjs
+node tests/responsive-layout-smoke.mjs
+node tests/window-cycle-smoke.mjs
 node tests/update-notice-smoke.mjs
 ```
 
