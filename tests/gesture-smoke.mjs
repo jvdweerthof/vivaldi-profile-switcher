@@ -10,7 +10,12 @@ const source = fs.readFileSync(
 function createHarness({
   maximize = false,
   windowType = 'normal',
-  windowsAvailable = true
+  windowsAvailable = true,
+  currentWindowId = 7,
+  profileWindows = [
+    { id: 7, state: 'normal', type: 'normal' },
+    { id: 8, state: 'normal', type: 'normal' }
+  ]
 } = {}) {
   const handlers = new Map();
   const timers = new Map();
@@ -85,11 +90,14 @@ function createHarness({
       ...(windowsAvailable ? {
         windows: {
           getCurrent(callback) {
-            callback({ id: 7, state: windowState, type: windowType });
+            callback({ id: currentWindowId, state: windowState, type: windowType });
+          },
+          getAll(_query, callback) {
+            callback(profileWindows);
           },
           update(id, updateInfo, callback) {
             windowUpdates.push({ id, updateInfo });
-            windowState = updateInfo.state;
+            if (updateInfo.state) windowState = updateInfo.state;
             callback({ id, ...updateInfo });
           }
         }
@@ -123,10 +131,10 @@ function createHarness({
     source.replace('maximize: false', 'maximize: true') : source;
   vm.runInContext(configuredSource, context, { filename: 'profile-switcher.js' });
 
-  function wheel(deltaX, delay = 10) {
+  function wheel(deltaX, delay = 10, altKey = false) {
     advance(delay);
     handlers.get('wheel')({
-      altKey: false,
+      altKey,
       button: 0,
       cancelable: true,
       ctrlKey: false,
@@ -146,6 +154,7 @@ function createHarness({
     blur: () => handlers.get('blur')(),
     focus: () => handlers.get('focus')(),
     openedProfiles,
+    optionWheel: (deltaX, delay = 10) => wheel(deltaX, delay, true),
     restoreWindow: () => {
       windowState = 'normal';
     },
@@ -154,12 +163,129 @@ function createHarness({
   };
 }
 
+function createSingleWindowHarness() {
+  return createHarness({
+    profileWindows: [{ id: 7, state: 'normal', type: 'normal' }]
+  });
+}
+
+{
+  const test = createHarness({
+    profileWindows: [
+      {
+        id: 7,
+        state: 'normal',
+        type: 'normal',
+        tabs: [{ active: true, id: 70, vivExtData: '{}' }]
+      },
+      {
+        id: 8,
+        state: 'normal',
+        type: 'normal',
+        tabs: [{ active: true, id: 80, vivExtData: '{}' }]
+      }
+    ]
+  });
+  test.wheel(40);
+  test.wheel(40);
+  test.wheel(40);
+  assert.equal(
+    JSON.stringify(test.windowUpdates),
+    JSON.stringify([{ id: 8, updateInfo: { focused: true } }]),
+    'default navigation visits the next normal window before another profile'
+  );
+  assert.deepEqual(test.openedProfiles, []);
+}
+
+{
+  const test = createHarness({
+    currentWindowId: 8,
+    profileWindows: [
+      {
+        id: 7,
+        state: 'normal',
+        type: 'normal',
+        tabs: [{ active: true, id: 70, vivExtData: '{}' }]
+      },
+      {
+        id: 8,
+        state: 'normal',
+        type: 'normal',
+        tabs: [{ active: true, id: 80, vivExtData: '{}' }]
+      }
+    ]
+  });
+  test.wheel(40);
+  test.wheel(40);
+  test.wheel(40);
+  assert.deepEqual(
+    test.openedProfiles,
+    ['next'],
+    'default navigation switches profiles at the final local window'
+  );
+}
+
 {
   const test = createHarness();
+  test.optionWheel(40);
+  test.optionWheel(40);
+  test.optionWheel(40);
+  assert.equal(
+    JSON.stringify(test.windowUpdates),
+    JSON.stringify([{ id: 8, updateInfo: { focused: true } }]),
+    'modifier state does not change the sole window-first navigation behavior'
+  );
+  assert.deepEqual(
+    test.openedProfiles,
+    [],
+    'the modifier swipe visits a window before switching profiles'
+  );
+}
+
+{
+  const test = createHarness({
+    currentWindowId: 8,
+    profileWindows: [
+      { id: 7, state: 'normal', type: 'normal' },
+      { id: 99, state: 'normal', type: 'popup' },
+      { id: 8, state: 'normal', type: 'normal' }
+    ]
+  });
+  test.wheel(-40);
+  test.wheel(-40);
+  test.wheel(-40);
+  assert.equal(
+    JSON.stringify(test.windowUpdates),
+    JSON.stringify([{ id: 7, updateInfo: { focused: true } }]),
+    'window switching excludes popup windows'
+  );
+}
+
+{
+  const test = createHarness({
+    currentWindowId: 8,
+    profileWindows: [
+      { id: 7, state: 'normal', type: 'normal' },
+      { id: 8, state: 'normal', type: 'normal' },
+      { id: 9, state: 'normal', type: 'normal' }
+    ]
+  });
+  test.wheel(-40);
+  test.wheel(-40);
+  test.wheel(-40);
+  assert.equal(
+    JSON.stringify(test.windowUpdates),
+    JSON.stringify([{ id: 7, updateInfo: { focused: true } }]),
+    'default navigation switches profile windows in either direction'
+  );
+}
+
+{
+  const test = createHarness({ currentWindowId: 8 });
   test.wheel(40);
   test.wheel(40);
   test.wheel(40);
-  assert.equal(test.openedProfiles.length, 1, 'a normal swipe switches once');
+  assert.equal(test.openedProfiles.length, 1, 'a boundary swipe switches profiles once');
   test.wheel(50);
   test.wheel(30);
   assert.equal(test.openedProfiles.length, 1, 'momentum cannot switch twice');
@@ -215,7 +341,7 @@ function createHarness({
 }
 
 {
-  const test = createHarness();
+  const test = createSingleWindowHarness();
   test.focus();
   test.wheel(30);
   test.wheel(25);
@@ -232,7 +358,7 @@ function createHarness({
 }
 
 {
-  const test = createHarness();
+  const test = createSingleWindowHarness();
   test.focus();
   test.wheel(30);
   test.wheel(20);
@@ -246,7 +372,7 @@ function createHarness({
 }
 
 {
-  const test = createHarness();
+  const test = createSingleWindowHarness();
   test.focus();
   test.wheel(10);
   test.wheel(20);
@@ -260,7 +386,7 @@ function createHarness({
 }
 
 {
-  const test = createHarness();
+  const test = createSingleWindowHarness();
   test.focus();
   test.wheel(30);
   test.wheel(25);
@@ -275,14 +401,14 @@ function createHarness({
 }
 
 {
-  const sourceWindow = createHarness();
+  const sourceWindow = createSingleWindowHarness();
   sourceWindow.wheel(40);
   sourceWindow.wheel(40);
   sourceWindow.wheel(40);
   assert.equal(sourceWindow.openedProfiles.length, 1);
   sourceWindow.blur();
 
-  const targetWindow = createHarness();
+  const targetWindow = createSingleWindowHarness();
   targetWindow.focus();
   targetWindow.wheel(10);
   targetWindow.wheel(20);
@@ -296,7 +422,7 @@ function createHarness({
 }
 
 {
-  const test = createHarness();
+  const test = createSingleWindowHarness();
   test.focus();
   test.wheel(16);
   test.wheel(10);
@@ -312,7 +438,7 @@ function createHarness({
 }
 
 {
-  const test = createHarness();
+  const test = createSingleWindowHarness();
   test.focus();
   test.wheel(16);
   test.wheel(-30);
@@ -326,7 +452,7 @@ function createHarness({
 }
 
 {
-  const test = createHarness();
+  const test = createSingleWindowHarness();
   test.focus();
   test.wheel(40, 50);
   test.wheel(35);
